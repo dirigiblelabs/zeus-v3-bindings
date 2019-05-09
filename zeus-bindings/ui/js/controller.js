@@ -1,6 +1,6 @@
-angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
+angular.module('page', ['ideUiCore', 'ngRs', 'ui.bootstrap'])
 .config(["messageHubProvider", function(messageHubProvider) {
-	messageHubProvider.evtNamePrefix = 'zeus.Explore.Services';
+	messageHubProvider.evtNamePrefix = 'zeus.Explore.Bindings';
 }])    
 .factory('$messageHub', ['messageHub', function (messageHub) {
     return {
@@ -13,14 +13,21 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
     };
 }])
 .config(["EntityProvider", function(entityProvider) {
-  entityProvider.config.apiEndpoint = '../../../../../../../../services/v3/js/zeus-services/api/services.js';
+  entityProvider.config.apiEndpoint = '../../../../../../../../services/v3/js/zeus-bindings/api/bindings.js';
 }])
-.controller('PageController', ['Entity', '$messageHub', function (Entity, $messageHub) {
+.controller('PageController', ['Entity', '$messageHub', '$http', function (Entity, $messageHub, $http) {
 
     this.dataPage = 1;
     this.dataCount = 0;
     this.dataOffset = 0;
     this.dataLimit = 10;
+
+    this.b64decode = function(input){
+        if(input == null){
+            return "";
+        }
+        return btoa(input);
+    };
 
 	this.getPages = function () {
         return new Array(this.dataPages);
@@ -46,12 +53,7 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
 		        .then(function (data) {
 	                this.dataCount = data.$count;
 	                this.dataPages = Math.ceil(this.dataCount / this.dataLimit);
-	                this.data = data.map(function(entity){
-                        entity.host = entity.hosts;
-                        entity.portProto = entity.ports.split(":")[0];
-                        entity.portNumber = entity.ports.split(":")[1];
-                        return entity;
-                    });
+	                this.data = data;
 	            }.bind(this))
 	            .catch(function (err) {
 	               if (err.data){
@@ -63,7 +65,14 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
 
     this.openNewDialog = function (entity) {
         this.actionType = entity?'update':'new';
-        this.entity = entity || {};
+        this.entity = entity || {
+            properties:{}
+        };
+        this.property = {};
+        this.services = $http.get('../../../../../../../../services/v3/js/zeus-services/api/services.js')
+                .then(function(r) {
+                    this.services = r.data;
+                }.bind(this));
         toggleEntityModal();
     };
 
@@ -80,17 +89,14 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
     };
 	
 	var entityAction = function(action){
-        if (entity.portNumber && entity.portProto){
-            entity.ports = [{
-                name: entity.portProto.toLowerCase(),
-                "number": entity.portNumber,
-                "protocol": entity.portProto
-            }]
-            if (entity.host){
-                entity.hosts = [entity.host];
-            }
+		let args = [this.entity];
+        if(action === 'update'){
+            args.unshift({name: this.entity.name});
         }
-		return Entity[action]({id: this.entity.id}, this.entity).$promise
+        if(action === 'update' || action === 'save'){
+            this.entity.service = this.entity.service.name;
+        }
+		return Entity[action].apply(this, args).$promise
 			 	.then(function () {
 		            this.loadPage(this.dataPage);
 		            $messageHub.messageEntityModified();
@@ -115,11 +121,24 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
     this.delete = function () {
     	return entityAction('delete');
     };
-    
+
     this.parseDate = function(dateString){
     	return Date.parse(dateString);
     };
-    
+
+    this.addProperty =  function(){
+        this.entity.properties[this.property.name] = this.property.value;
+        this.property.name = "";
+        this.property.value = "";
+    };
+    this.removeProperty =  function(name){
+        delete this.entity.properties[name];
+    }
+
+    this.canSubmit = function(){
+        return this.entity && this.entity.service && Object.keys(this.entity.properties).length > 0;
+    }
+
     $messageHub.onEntityRefresh(this.loadPage);
 
     var toggleEntityModal = function() {
@@ -128,4 +147,4 @@ angular.module('page', ['ideUiCore', 'ngRsData', 'ui.bootstrap'])
     }.bind(this);
     
     this.loadPage(this.dataPage);
-}]);
+}])
